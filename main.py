@@ -1,5 +1,5 @@
 import os
-from flask import Flask, flash, request, redirect, url_for, session, send_file
+from flask import Flask, render_template, jsonify, flash, request, redirect, url_for, session, send_file
 from werkzeug.utils import secure_filename
 import re
 import json
@@ -7,6 +7,7 @@ import requests
 from PIL import Image, ImageFont, ImageDraw
 #import requests
 
+from forms import LogParseForm, GraphicGeneratorForm
 
 #Flask file config
 UPLOAD_FOLDER = ''
@@ -26,29 +27,15 @@ def allowed_file(filename):
 
 @app.route('/', methods=['GET', 'POST'])
 def main_page():
-    return '''
-    <!doctype html>
-    <title>Formula Trout League</title>
-    <h1>Formula Trout League Admin Tools</h1> 
-    <form id="package_form" action="" method="post">
-    
-      <div class="panel-body">
-          <input type ="submit" name="action" value="logparse">
-      </div>
-      <div class="panel-body">
-          <input type ="submit" name="action" value="GrDesgn">
-      </div>
-
-    </form>
-    '''
-    if request.form['action'] == 'logparse':
-        return redirect('logparse')
-    elif request.form['action'] == 'GrDesgn':
-        return redirect('graphicform')
+    if request.method == 'GET':
+        return render_template('index.html')
 
 @app.route('/logparse', methods=['GET', 'POST'])
 def upload_file():
+    form = LogParseForm()
     if request.method == 'POST':
+        file = form.file_name.data
+
         # check if the post request has the file part
         if 'file' not in request.files:
             flash('No file part')
@@ -64,15 +51,8 @@ def upload_file():
             file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
             return redirect(url_for('process_file', name=filename))
 
-    return '''
-    <!doctype html>
-    <title>Formula Trout League</title>
-    <h1>Upload new File</h1>
-    <form method=post enctype=multipart/form-data>
-      <input type=file name=file>
-      <input type=submit value=Upload>
-    </form>
-    '''
+    if request.method == 'GET':
+        return render_template('logparse.html', form=form)
 
 @app.route('/logparse/res/<name>')
 def process_file(name):
@@ -103,65 +83,59 @@ def process_file(name):
 
 @app.route('/graphicform', methods=['GET', 'POST'])
 def graph_form():
+    form = GraphicGeneratorForm()
     if request.method == 'POST':
-        grtitle = request.form['title']
-        grlink = str(request.form['result'])
-        return redirect(url_for('graph_gen', title=grtitle, result=grlink)) #, title=title, result=result
-    return ''' 
-    <!doctype html>
-    <form method=post enctype=multipart/form-data>
-        <label for="title">FUCK:</label>
-        <input type="text" name="title"><br><br>
-        <label for="result">THIS:</label>
-        <input type="text" name="result"><br><br>
-        <input type="submit" value="SHIT">
-    </form> '''
+        grtitle = request.form['race_title']
+        grlink = str(request.form['json_file_name'])
+        return redirect(url_for('graph_gen', title=grtitle, event=grlink)) #, title=title, result=result
 
+    if request.method == 'GET':
+        return render_template('graphicform.html', form=form)
 
-
-
-
-@app.route('/graphicform/graphicgen/<title>/<result>')
-def graph_gen(title, result):
+@app.route('/graphicform/graphicgen/<title>/<event>')
+def graph_gen(title, event):
+    url = "http://75.119.157.74:8772/results/download/" + event
+    response = requests.get(url) 
+    if response.status_code == 404:
+        return f'The race results from the URL {url} could not be downloaded.'
+    
+    drivers_json = response.json()
 
     imgwidth = 400
     imgheight = 300
     raceName = title
     x = 80
-    result2 = "http://75.119.157.74:8772/results/download/" + result
+    
     try:
         img_r  = Image.open("back.jpg")
         img = img_r.crop((img_r.width*0.4, img_r.height//4, img_r.width*0.6, img_r.height*0.7))
     except:
         img  = Image.new( mode = "RGB", size = (imgwidth, imgheight), color = (50, 50, 50) )
 
-    logo = Image.open("res/Formula_Trout_League.png")
+    logo = Image.open("res/Formula_Trout_League_logo.png")
     #img.show()
 
-    font = ImageFont.truetype("/usr/share/fonts/truetype/arkpandora/AerialBd.ttf", 50)
+    # font = ImageFont.truetype("./res/fonts/ArialBd.ttf", 50)
 
     Im = ImageDraw.Draw(img)
 
     drivernames = []
     i = 1
 
-    response = requests.get(result2) 
-    driversjson = json.loads(response.text)
-
-    for drivers in driversjson['Result']:
+    for drivers in drivers_json['Result']:
         strI = str(i)
         drivernames.append(strI + ". " + drivers['DriverName'])
         i=i+1
 
     #print(drivernames)
-    font = ImageFont.truetype("/usr/share/fonts/truetype/arkpandora/AerialBd.ttf", 35)
+    font = ImageFont.truetype("./res/fonts/ArialBd.ttf", 35)
 
     driver3 = drivernames[:3]
-    Im.text((10, 10), raceName ,fill=(255, 255, 255), font=font)
-    font = ImageFont.truetype("/usr/share/fonts/truetype/arkpandora/AerialBd.ttf", 30)
+    Im.text((10, 10), raceName, fill=(255, 255, 255), font=font)
+    font = ImageFont.truetype("./res/fonts/ArialBd.ttf", 30)
 
     for driver2 in driver3:
-        Im.text((20, x), driver2 ,fill=(255, 255, 255), font=font)
+        Im.text((20, x), driver2, fill=(255, 255, 255), font=font)
         x=x+50
 
     size = (60,40)
@@ -169,5 +143,7 @@ def graph_gen(title, result):
     img.paste(logo, (320,230), logo)
 
     #img.show()
-    img.save("raceresult.jpg")
-    return send_file('raceresult.jpg', mimetype='image/jpg')
+    img.save("./output/raceresult.jpg")
+    return send_file('./output/raceresult.jpg', mimetype='image/jpg')
+
+app.run(debug=True)
